@@ -69,6 +69,6 @@ python -m src.api.main
 
 ## Author
 
-**Parsharam Chinthalathadem (Ram)**
+**Parsharam Chinthalathadem**
 M.S. Computer Science (AI/ML) — Auburn University at Montgomery
 
