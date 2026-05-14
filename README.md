@@ -71,4 +71,4 @@ python -m src.api.main
 
 **Parsharam Chinthalathadem (Ram)**
 M.S. Computer Science (AI/ML) — Auburn University at Montgomery
-CEO & Founder — PSR IT Solutions LLC
+
