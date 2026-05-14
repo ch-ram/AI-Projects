@@ -1,0 +1,45 @@
+{
+  "model_configs": {
+    "llama-3.1-8b-lora": {
+      "base_model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+      "lora_r": 64,
+      "lora_alpha": 128,
+      "lora_dropout": 0.05,
+      "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+      "use_qlora": true,
+      "qlora_bits": 4,
+      "max_seq_length": 2048,
+      "learning_rate": 2e-4,
+      "epochs": 3,
+      "batch_size": 4,
+      "gradient_accumulation": 4
+    },
+    "mistral-7b-lora": {
+      "base_model": "mistralai/Mistral-7B-Instruct-v0.3",
+      "lora_r": 32,
+      "lora_alpha": 64,
+      "lora_dropout": 0.05,
+      "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+      "use_qlora": true,
+      "qlora_bits": 4,
+      "max_seq_length": 4096,
+      "learning_rate": 1e-4,
+      "epochs": 3,
+      "batch_size": 2,
+      "gradient_accumulation": 8
+    },
+    "phi-3-mini-lora": {
+      "base_model": "microsoft/Phi-3-mini-4k-instruct",
+      "lora_r": 16,
+      "lora_alpha": 32,
+      "lora_dropout": 0.1,
+      "target_modules": ["qkv_proj", "o_proj"],
+      "use_qlora": false,
+      "max_seq_length": 4096,
+      "learning_rate": 5e-5,
+      "epochs": 5,
+      "batch_size": 8,
+      "gradient_accumulation": 2
+    }
+  }
+}

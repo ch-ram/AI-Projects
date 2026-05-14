@@ -1,0 +1,33 @@
+replicaCount: 2
+
+image:
+  tag: "staging-latest"
+
+env:
+  APP_ENV: staging
+  API_WORKERS: "4"
+  LOG_LEVEL: WARNING
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+
+ingress:
+  hosts:
+    - host: staging-api.psrit.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: genai-staging-tls
+      hosts:
+        - staging-api.psrit.com

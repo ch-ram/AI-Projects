@@ -1,0 +1,138 @@
+name: CI/CD — LLM Fine-Tuning Pipeline
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, 'release/*', main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/llm-finetuning
+
+jobs:
+  # ── Lint & Unit Tests ─────────────────────────────────────
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install deps
+        run: |
+          pip install ruff pytest pytest-cov
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install transformers datasets peft pydantic pydantic-settings structlog
+      - name: Lint
+        run: ruff check src/ tests/
+      - name: Unit tests
+        env:
+          APP_ENV: development
+        run: pytest tests/unit/ -v --cov=src --cov-report=xml
+      - uses: codecov/codecov-action@v4
+
+  # ── Build Training Image ──────────────────────────────────
+  build-training:
+    name: Build Training Image
+    needs: [lint-and-test]
+    if: github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.train
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-train:${{ github.sha }}
+
+  # ── Training Job (QA) ────────────────────────────────────
+  train-qa:
+    name: Training (QA)
+    needs: [build-training]
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    environment: qa
+    steps:
+      - uses: actions/checkout@v4
+      - name: Submit training job
+        run: |
+          echo "Submitting training job to QA GPU cluster..."
+          # kubectl apply -f k8s/training-job-qa.yaml
+
+  # ── Evaluation Gate ───────────────────────────────────────
+  eval-gate:
+    name: Evaluation Gate
+    needs: [train-qa]
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run benchmarks
+        run: |
+          echo "Running evaluation benchmarks..."
+          # python -m src.evaluation.benchmarks --model checkpoints/qa/final
+      - name: Check quality gate
+        run: |
+          echo "Checking if model meets quality thresholds..."
+          # python scripts/check_eval_gate.py --results eval_results.json
+
+  # ── Build Serving Image ──────────────────────────────────
+  build-serving:
+    name: Build Serving Image
+    needs: [eval-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.serve
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-serve:${{ github.sha }}
+
+  # ── Deploy Staging ────────────────────────────────────────
+  deploy-staging:
+    name: Deploy Staging
+    needs: [build-serving]
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Deploy serving to staging
+        run: echo "Deploying to staging inference cluster..."
+
+  # ── Deploy Production ─────────────────────────────────────
+  deploy-production:
+    name: Deploy Production
+    needs: [lint-and-test]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to production
+        run: echo "Deploying to production inference cluster..."
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          generate_release_notes: true

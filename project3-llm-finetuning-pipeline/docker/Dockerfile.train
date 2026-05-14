@@ -1,0 +1,30 @@
+# ============================================================
+# Dockerfile.train — LLM Fine-Tuning Training Image
+# GPU-enabled with PyTorch, CUDA, DeepSpeed
+# ============================================================
+FROM nvidia/cuda:12.1.1-devel-ubuntu22.04 AS base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-dev python3-pip git && \
+    ln -sf /usr/bin/python3.11 /usr/bin/python && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src/ /app/src/
+COPY configs/ /app/configs/
+COPY scripts/ /app/scripts/
+
+RUN groupadd -r trainer && useradd -r -g trainer -d /app trainer
+RUN mkdir -p /app/checkpoints /app/data && chown -R trainer:trainer /app
+USER trainer
+
+ENV PYTHONPATH=/app
+ENTRYPOINT ["python", "-m", "src.training.trainer"]

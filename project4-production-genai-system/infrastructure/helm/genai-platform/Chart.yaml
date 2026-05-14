@@ -1,0 +1,9 @@
+apiVersion: v2
+name: genai-platform
+description: Production GenAI Platform Helm Chart
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Parsharam Chinthalathadem
+    email: ram@psrit.com

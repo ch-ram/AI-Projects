@@ -1,0 +1,41 @@
+# ============================================================
+# Dockerfile.serve — LLM Inference Serving Image
+# Optimized for vLLM serving with GPU
+# ============================================================
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-dev python3-pip && \
+    ln -sf /usr/bin/python3.11 /usr/bin/python && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    vllm>=0.6.0 \
+    fastapi>=0.115.0 \
+    uvicorn[standard]>=0.30.0 \
+    pydantic>=2.9.0 \
+    pydantic-settings>=2.5.0 \
+    structlog>=24.4.0 \
+    python-dotenv>=1.0.0
+
+COPY src/ /app/src/
+COPY configs/ /app/configs/
+
+RUN groupadd -r serving && useradd -r -g serving -d /app serving
+RUN mkdir -p /app/models && chown -R serving:serving /app
+USER serving
+
+EXPOSE 8002
+
+ENV PYTHONPATH=/app
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')" || exit 1
+
+CMD ["python", "-m", "uvicorn", "src.serving.server:create_serving_app", \
+     "--factory", "--host", "0.0.0.0", "--port", "8002"]

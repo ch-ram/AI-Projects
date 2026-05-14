@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  trainer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.train
+    container_name: llm-trainer
+    env_file:
+      - ../configs/dev/.env.dev
+    volumes:
+      - ../src:/app/src
+      - ../data:/app/data
+      - ../checkpoints:/app/checkpoints
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - ft-network
+
+  serving:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.serve
+    container_name: llm-serving
+    ports:
+      - "8002:8002"
+    env_file:
+      - ../configs/dev/.env.dev
+    volumes:
+      - ../checkpoints:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - ft-network
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.17.0
+    container_name: mlflow-server
+    ports:
+      - "5000:5000"
+    command: mlflow server --host 0.0.0.0 --port 5000
+    volumes:
+      - mlflow-data:/mlflow
+    networks:
+      - ft-network
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: ft-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - ft-network
+
+volumes:
+  mlflow-data:
+
+networks:
+  ft-network:
+    driver: bridge

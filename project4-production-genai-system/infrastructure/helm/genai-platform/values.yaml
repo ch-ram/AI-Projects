@@ -1,0 +1,90 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/ch-ram/genai-api
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: api.psrit.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: genai-tls
+      hosts:
+        - api.psrit.com
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+env:
+  APP_ENV: production
+  API_PORT: "8000"
+  API_WORKERS: "4"
+  ENABLE_PROMETHEUS: "true"
+  ENABLE_TRACING: "true"
+
+secrets:
+  - name: OPENAI_API_KEY
+    secretName: genai-secrets
+    secretKey: openai-api-key
+  - name: JWT_SECRET_KEY
+    secretName: genai-secrets
+    secretKey: jwt-secret
+  - name: DATABASE_URL
+    secretName: genai-secrets
+    secretKey: database-url
+
+livenessProbe:
+  httpGet:
+    path: /live
+    port: 8000
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

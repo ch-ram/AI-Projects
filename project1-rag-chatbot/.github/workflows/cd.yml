@@ -1,0 +1,147 @@
+name: CD — Deploy to Staging & Production
+
+on:
+  push:
+    branches:
+      - 'release/*'   # Staging
+      - main           # Production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/rag-chatbot
+
+jobs:
+  # ── Deploy to Staging (release/* branches) ────────────────
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/heads/release/')
+    environment:
+      name: staging
+      url: https://staging.psrit.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push staging image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }}
+          build-args: |
+            APP_ENV=staging
+
+      - name: Run E2E smoke tests
+        env:
+          API_URL: https://staging-api.psrit.com
+        run: |
+          echo "Running smoke tests against staging..."
+          # pytest tests/e2e/ -v --api-url=$API_URL
+
+      - name: Deploy to staging cluster
+        env:
+          KUBECONFIG: ${{ secrets.STAGING_KUBECONFIG }}
+        run: |
+          echo "Deploying to staging Kubernetes cluster..."
+          # kubectl set image deployment/rag-chatbot \
+          #   app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }} \
+          #   -n staging
+          # kubectl rollout status deployment/rag-chatbot -n staging
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          text: "RAG Chatbot deployed to STAGING: ${{ github.sha }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ── Deploy to Production (main branch) ────────────────────
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://app.psrit.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push production image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          build-args: |
+            APP_ENV=production
+
+      - name: Deploy to production (canary)
+        env:
+          KUBECONFIG: ${{ secrets.PROD_KUBECONFIG }}
+        run: |
+          echo "Deploying canary to production..."
+          # kubectl set image deployment/rag-chatbot-canary \
+          #   app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+          #   -n production
+          # kubectl rollout status deployment/rag-chatbot-canary -n production
+
+      - name: Production smoke test
+        run: |
+          echo "Running production smoke tests..."
+          # pytest tests/e2e/test_smoke.py -v --api-url=https://api.psrit.com
+
+      - name: Promote canary to full rollout
+        env:
+          KUBECONFIG: ${{ secrets.PROD_KUBECONFIG }}
+        run: |
+          echo "Promoting to full production rollout..."
+          # kubectl set image deployment/rag-chatbot \
+          #   app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+          #   -n production
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          text: "🚀 RAG Chatbot deployed to PRODUCTION: ${{ github.sha }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}

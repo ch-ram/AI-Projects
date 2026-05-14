@@ -1,0 +1,115 @@
+name: CD — Deploy
+
+on:
+  push:
+    branches:
+      - 'release/*'
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/genai
+
+jobs:
+  deploy-staging:
+    name: Deploy Staging
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.psrit.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push
+        run: |
+          docker build -f docker/rag/Dockerfile -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:staging-${{ github.sha }} .
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:staging-${{ github.sha }}
+
+      - name: Deploy to EKS staging
+        env:
+          KUBECONFIG: ${{ secrets.STAGING_KUBECONFIG }}
+        run: |
+          helm upgrade --install genai-platform infrastructure/helm/genai-platform \
+            -f infrastructure/helm/values/staging.yaml \
+            --set image.tag=staging-${{ github.sha }} \
+            -n staging --create-namespace
+
+      - name: Smoke test
+        run: |
+          sleep 30
+          curl -sf https://staging-api.psrit.com/health || exit 1
+
+      - name: Notify
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          text: "GenAI Platform deployed to STAGING"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  deploy-production:
+    name: Deploy Production
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://app.psrit.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push
+        run: |
+          docker build -f docker/rag/Dockerfile -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ github.sha }} .
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api:${{ github.sha }}
+
+      - name: Deploy canary
+        env:
+          KUBECONFIG: ${{ secrets.PROD_KUBECONFIG }}
+        run: |
+          helm upgrade --install genai-platform infrastructure/helm/genai-platform \
+            -f infrastructure/helm/values/production.yaml \
+            --set image.tag=${{ github.sha }} \
+            --set replicaCount=1 \
+            -n production
+
+      - name: Production smoke test
+        run: |
+          sleep 30
+          curl -sf https://api.psrit.com/health || exit 1
+
+      - name: Full rollout
+        env:
+          KUBECONFIG: ${{ secrets.PROD_KUBECONFIG }}
+        run: |
+          helm upgrade --install genai-platform infrastructure/helm/genai-platform \
+            -f infrastructure/helm/values/production.yaml \
+            --set image.tag=${{ github.sha }} \
+            -n production
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          generate_release_notes: true
+
+      - name: Notify
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          text: "🚀 GenAI Platform deployed to PRODUCTION"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}

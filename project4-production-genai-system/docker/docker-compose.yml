@@ -1,0 +1,115 @@
+version: "3.9"
+
+services:
+  nginx:
+    build:
+      context: nginx/
+    container_name: genai-nginx
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - genai-network
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/rag/Dockerfile
+      args:
+        APP_ENV: development
+    container_name: genai-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../configs/dev/.env.dev
+    volumes:
+      - ../src:/app/src
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - genai-network
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: genai-postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: genai_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - genai-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: genai-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+    volumes:
+      - redis-data:/data
+    networks:
+      - genai-network
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: genai-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - genai-network
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: genai-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - genai-network
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    container_name: genai-otel
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    networks:
+      - genai-network
+
+volumes:
+  pg-data:
+  redis-data:
+  grafana-data:
+
+networks:
+  genai-network:
+    driver: bridge
